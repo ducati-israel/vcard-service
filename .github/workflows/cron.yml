@@ -31,11 +31,18 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: "${{secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}}"
           GOOGLE_SPREADSHEET_ID: "${{secrets.GOOGLE_SPREADSHEET_ID}}"
+          AWS_ACCESS_KEY_ID: "${{secrets.AWS_ACCESS_KEY_ID}}"
+          AWS_SECRET_ACCESS_KEY: "${{secrets.AWS_SECRET_ACCESS_KEY}}"
+          AWS_REGION: "eu-central-1"
+          AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
 
       - name: Run Sync
+        run: |
+          python3 main.py
         env:
           GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: "${{secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}}"
           GOOGLE_SPREADSHEET_ID: "${{secrets.GOOGLE_SPREADSHEET_ID}}"
-        run: |
-          python3 main.py
-
+          AWS_ACCESS_KEY_ID: "${{secrets.AWS_ACCESS_KEY_ID}}"
+          AWS_SECRET_ACCESS_KEY: "${{secrets.AWS_SECRET_ACCESS_KEY}}"
+          AWS_REGION: "eu-central-1"
+          AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
