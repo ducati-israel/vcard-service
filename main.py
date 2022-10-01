@@ -122,7 +122,7 @@ def normalize_email_address(email_address):
 def main():
     logging.basicConfig(level=logging.INFO)
     with GoogleSheetsClient(GOOGLE_SERVICE_ACCOUNT_CREDENTIALS) as google_sheets_client:
-        for item in google_sheets_client.items:
+        for index, item in enumerate(google_sheets_client.items):
             membership_year = item['חברות']
             ducati_member_code = item['קוד דוקאטי']
             role = item['תפקיד']
@@ -137,11 +137,11 @@ def main():
             vcard_id = f'{email_address}:{phone_number}'
             vcard_id = vcard_id.encode()
             vcard_id = hashlib.sha1(vcard_id).hexdigest()
-            short_vcard_id = vcard_id[10:]
+            short_vcard_id = vcard_id[:10]
 
             bot_status = item.get(HEADER_BOT_STATUS, '')
             if bot_status == STATUS_ISSUE:
-                logging.info(f'issuing card for member id="{short_vcard_id}"')
+                logging.info(f'issuing card for member #{index}')
 
                 vcard = {
                     "hebrew_full_name": hebrew_full_name,
@@ -154,7 +154,13 @@ def main():
                 }
                 vcard = json.dumps(vcard)
                 vcard = vcard.encode('utf-8')
-                s3_resource.meta.client.put_object(Body=vcard, Bucket=AWS_S3_BUCKET_NAME, Key=f'{vcard_id}.json', ACL='public-read')
+                s3_resource.meta.client.put_object(Body=vcard, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
+
+                short_url_info = json.dumps({
+                    'id': vcard_id
+                })
+                short_url_info = short_url_info.encode('utf-8')
+                s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_DONE)
                 # TODO send sms message
