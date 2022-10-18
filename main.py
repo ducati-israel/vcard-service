@@ -151,7 +151,7 @@ def main():
             if not re.match(r'^\d+$', ducati_member_code):
                 ducati_member_code = INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER
 
-            bot_status = item.get(HEADER_BOT_STATUS, '')
+            bot_status = item.get(HEADER_BOT_STATUS, '').strip()
             if bot_status == STATUS_ISSUE:
                 vcard_info = {
                     "hebrew_full_name": hebrew_full_name,
