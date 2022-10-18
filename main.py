@@ -167,8 +167,6 @@ def main():
                     vcard_info['revoked'] = revoked
                     logging.info(f'revoked card #{index}')
 
-                logging.info(f'{short_vcard_id} {vcard_info}')
-
                 vcard_info = json.dumps(vcard_info)
                 vcard_info = vcard_info.encode('utf-8')
                 aws_s3_resource.meta.client.put_object(Body=vcard_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
@@ -189,6 +187,8 @@ def main():
                 # send_email(email_subject, email_message, email_address)
 
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_DONE)
+                logging.info(f'issued card for line #{index}')
+
         except:
             logging.exception(f'failed issuing card for line #{index}')
             google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_ERROR)
