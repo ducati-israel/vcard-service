@@ -198,13 +198,13 @@ def main():
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
+                time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
                 logging.info(f'issued card for line #{index}')
 
         except:
             logging.exception(f'failed issuing card for line #{index}')
             new_status = f'{bot_status} - {STATUS_ERROR}' if bot_status else STATUS_ERROR
             google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
-        finally:
             time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
 
 
