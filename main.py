@@ -16,9 +16,10 @@ dotenv.load_dotenv()
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 HEADER_BOT_STATUS = 'סטטוס בוט'
+STATUS_UPDATE = 'עדכון'
 STATUS_ISSUE = 'הנפקה'
-STATUS_ISSUE_DONE = 'הנפקה - בוצע'
-STATUS_ISSUE_ERROR = 'הנפקה - שגיאה'
+STATUS_DONE = 'בוצע'
+STATUS_ERROR = 'שגיאה'
 
 INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER = 'חסר רישום'
 
@@ -126,6 +127,7 @@ def main():
     google_sheets_client.reload()
 
     for index, item in enumerate(google_sheets_client.items):
+        bot_status = ''
         try:
             email_address = item['כתובת אימייל']
             if not email_address:
@@ -158,7 +160,7 @@ def main():
                 ducati_member_code = INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER
 
             bot_status = item.get(HEADER_BOT_STATUS, '').strip()
-            if bot_status == STATUS_ISSUE:
+            if bot_status in [STATUS_ISSUE, STATUS_UPDATE]:
                 vcard_info = {
                     "hebrew_full_name": hebrew_full_name,
                     "english_full_name": english_full_name,
@@ -183,7 +185,7 @@ def main():
                 short_url_info = short_url_info.encode('utf-8')
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
-                if not revoked:
+                if not revoked and bot_status != STATUS_UPDATE:
                     short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
                     sms_message = SMS_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
                     send_sms(phone_number, sms_message)
@@ -191,12 +193,14 @@ def main():
                     email_message = EMAIL_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
                     send_email(EMAIL_SUBJECT, email_message, email_address)
 
-                google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_DONE)
+                new_status = f'{bot_status} - {STATUS_DONE}'
+                google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
                 logging.info(f'issued card for line #{index}')
 
         except:
             logging.exception(f'failed issuing card for line #{index}')
-            google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_ERROR)
+            new_status = f'{bot_status} - {STATUS_ERROR}' if bot_status else STATUS_ERROR
+            google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
 
 
 if __name__ == '__main__':
