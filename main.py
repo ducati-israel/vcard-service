@@ -2,7 +2,6 @@ import hashlib
 import logging
 import os
 import re
-
 import boto3
 import json
 import dotenv
@@ -23,7 +22,9 @@ STATUS_ISSUE_ERROR = 'הנפקה - שגיאה'
 
 INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER = 'חסר רישום'
 
+EMAIL_SUBJECT = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
 EMAIL_ADDRESS_SENDER = "Ducati Israel <noreply@docil.co.il>"
+
 SMS_SENDER_ID = 'Ducati'
 
 GOOGLE_SPREADSHEET_ID = os.environ['GOOGLE_SPREADSHEET_ID']
@@ -59,10 +60,15 @@ def normalize_email_address(email_address):
 EMAIL_TEMPLATE_SUCCESS = '''
 היי {{hebrew_full_name}},
 שמחים שהצטרפת למועדון דוקאטי!
+
 הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
+
 אנא שמור על כתובת זו במועדפים.
+
 אנא הצג כרטיס זה בעת קבלת שירות או טיפול או רכישת אביזרים כדי לקבל את ההטבות המגיעות לחברי המועדון.
 שים לב לתוקף הרשום על הכרטיס: בגלל נהלי דוקאטי, שנת החברות תמיד מסתיימת בסוף אוקטובר של השנה המופיעה על הכרטיס.
+
+<img width="180" src="https://card.docil.co.il/preview.png">
 '''
 
 
@@ -177,14 +183,13 @@ def main():
                 short_url_info = short_url_info.encode('utf-8')
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
-                short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
-                sms_message = SMS_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
-                send_sms(phone_number, sms_message)
+                if not revoked:
+                    short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
+                    sms_message = SMS_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+                    send_sms(phone_number, sms_message)
 
-                # TODO enable send email message
-                email_message = EMAIL_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
-                email_subject = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
-                # send_email(email_subject, email_message, email_address)
+                    email_message = EMAIL_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+                    send_email(EMAIL_SUBJECT, email_message, email_address)
 
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, STATUS_ISSUE_DONE)
                 logging.info(f'issued card for line #{index}')
