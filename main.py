@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 import boto3
 import json
 import dotenv
@@ -35,6 +36,8 @@ AWS_ACCESS_KEY_ID = os.environ['AWS_ACCESS_KEY_ID']
 AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 AWS_SNS_REGION = os.environ['AWS_SNS_REGION']
 AWS_SES_REGION = os.environ['AWS_SES_REGION']
+
+RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
 
 aws_session = boto3.Session(aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 aws_s3_resource = aws_session.resource('s3')
@@ -201,6 +204,8 @@ def main():
             logging.exception(f'failed issuing card for line #{index}')
             new_status = f'{bot_status} - {STATUS_ERROR}' if bot_status else STATUS_ERROR
             google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
+        finally:
+            time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
 
 
 if __name__ == '__main__':
