@@ -22,8 +22,6 @@ STATUS_ISSUE = 'הנפקה'
 STATUS_DONE = 'בוצע'
 STATUS_ERROR = 'שגיאה'
 
-INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER = 'חסר רישום'
-
 EMAIL_SUBJECT = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
 EMAIL_ADDRESS_SENDER = "Ducati Israel <noreply@docil.co.il>"
 
@@ -158,9 +156,6 @@ def main():
             vcard_id = vcard_id.encode()
             vcard_id = hashlib.sha1(vcard_id).hexdigest()
             short_vcard_id = vcard_id[:10]
-
-            if not re.match(r'^\d+$', ducati_member_code):
-                ducati_member_code = INVALID_DUCATI_MEMBER_CODE_PLACEHOLDER
 
             bot_status = item.get(HEADER_BOT_STATUS, '').strip()
             if bot_status in [STATUS_ISSUE, STATUS_UPDATE]:
