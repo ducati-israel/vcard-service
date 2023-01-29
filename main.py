@@ -150,7 +150,7 @@ def main():
             hebrew_full_name = item['שם מלא בעברית'].strip()
             english_full_name = item['שם מלא באנגלית'].strip()
             motorcycle_model = item['דגם אופנוע נוכחי'].strip()
-            registration_type = 'זוגי' if item['רישום יחיד או בזוג'].lower().strip() == 'y' else 'יחיד'
+            registration_type = 'זוגי' if item['יחיד או זוג'].lower().strip() == 'y' else 'יחיד'
             revoked = item['עזב'].lower().strip() in ['y', 'rip']
             vcard_id = f'{email_address}:{phone_number}'
             vcard_id = vcard_id.encode()
