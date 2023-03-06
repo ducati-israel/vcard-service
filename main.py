@@ -86,6 +86,12 @@ SMS_TEMPLATE_SUCCESS = '''
 {{card_url}}
 '''
 
+TEMPLATE_MISSING_DUCATI_MEMBER_CODE = '''
+שים לב: הכרטיס הדיגיטלי שלך איננו מכיל מספר חבר כיוון שלא ביצעת רישום לאתר של דוקאטי העולמית.
+אנא גש לאתר המועדון בלינק הבא ובצע את הרישום לאתר של דוקאטי. לאחר מכן כרטיסך יעודכן עם מספר החבר החדש שלך:
+https://www.docil.co.il/newreg
+'''.strip()
+
 
 def send_email(email_subject, email_text, recipient_email_address, sender_email_address=EMAIL_ADDRESS_SENDER, reply_to_email_address=None):
     email_text_html = email_text.replace('\n', '<br>')
@@ -184,11 +190,19 @@ def main():
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
                 if not revoked and bot_status != STATUS_UPDATE:
+                    is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
+
                     short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
                     sms_message = SMS_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+                    if is_invalid_ducati_member_code:
+                        sms_message = f'{sms_message}\n{TEMPLATE_MISSING_DUCATI_MEMBER_CODE}'
+
                     send_sms(phone_number, sms_message)
 
                     email_message = EMAIL_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+                    if is_invalid_ducati_member_code:
+                        email_message = f'{email_message}\n{TEMPLATE_MISSING_DUCATI_MEMBER_CODE}'
+
                     send_email(EMAIL_SUBJECT, email_message, email_address)
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
