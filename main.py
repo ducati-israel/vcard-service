@@ -12,6 +12,8 @@ from botocore.exceptions import ClientError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from apple_card.apple_card_tools import get_apple_pass_bytes
+
 dotenv.load_dotenv()
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -129,6 +131,13 @@ def send_email(email_subject, email_text, recipient_email_address, sender_email_
         logging.exception('could not send email')
 
 
+def create_apple_card_file(vcard_info, s3_key):
+    pk_bytes = get_apple_pass_bytes(vcard_info)
+    pk_bytes.seek(0)
+    aws_s3_resource.meta.client.put_object(Body=pk_bytes, Bucket=AWS_S3_BUCKET_NAME, Key=s3_key,
+                                           ACL='public-read')
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
     google_sheets_client.reload()
@@ -179,9 +188,11 @@ def main():
                     vcard_info['revoked'] = revoked
                     logging.info(f'revoked card #{index}')
 
-                vcard_info = json.dumps(vcard_info)
-                vcard_info = vcard_info.encode('utf-8')
-                aws_s3_resource.meta.client.put_object(Body=vcard_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
+                vcard_info_json = json.dumps(vcard_info)
+                vcard_info_json_encoded = vcard_info_json.encode('utf-8')
+                aws_s3_resource.meta.client.put_object(Body=vcard_info_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
+
+                create_apple_card_file(vcard_info, f'apple_card/{vcard_id}.pkpass')
 
                 short_url_info = json.dumps({
                     'id': vcard_id
