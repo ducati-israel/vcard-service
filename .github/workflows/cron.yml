@@ -36,6 +36,8 @@ jobs:
           AWS_SNS_REGION: "eu-central-1"
           AWS_SES_REGION: "us-east-1"
           AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
+          APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
+          APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
 
       - name: Run Sync
         run: |
@@ -48,3 +50,5 @@ jobs:
           AWS_SNS_REGION: "eu-central-1"
           AWS_SES_REGION: "us-east-1"
           AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
+          APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
+          APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
