@@ -1,7 +1,9 @@
+import datetime
 import hashlib
 import logging
 import os
 import re
+import tempfile
 import time
 import boto3
 import json
@@ -11,15 +13,23 @@ from gdolim import GoogleSheetsClient
 from botocore.exceptions import ClientError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
-from apple_card.apple_card_tools import get_apple_pass_bytes
+from applepassgenerator.client import ApplePassGeneratorClient
+from applepassgenerator.models import Generic
 
 dotenv.load_dotenv()
+
+APPLE_CARD_TEAM_IDENTIFIER = "E85N35G3YB"
+APPLE_CARD_PASS_TYPE_IDENTIFIER = "pass.com.madappgang.doc.israel"
+APPLE_CARD_ORGANIZATION_NAME = "DOC Israel"
+APPLE_CARD_PKPASS_PRIVATE_KEY = os.environ['APPLE_CARD_PRIVATE_KEY']
+APPLE_CARD_PKPASS_PRIVATE_KEY = APPLE_CARD_PKPASS_PRIVATE_KEY.replace('\\n', '\n')
+APPLE_CARD_PKPASS_PRIVATE_KEY_PASSWORD = os.environ['APPLE_CARD_PRIVATE_KEY_PASSWORD']
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 HEADER_BOT_STATUS = 'סטטוס בוט'
 STATUS_UPDATE = 'עדכון'
+STATUS_UPDATE_TYPO = 'עידכון'
 STATUS_ISSUE = 'הנפקה'
 STATUS_DONE = 'בוצע'
 STATUS_ERROR = 'שגיאה'
@@ -131,11 +141,67 @@ def send_email(email_subject, email_text, recipient_email_address, sender_email_
         logging.exception('could not send email')
 
 
-def create_apple_card_file(vcard_info, s3_key):
-    pk_bytes = get_apple_pass_bytes(vcard_info)
-    pk_bytes.seek(0)
-    aws_s3_resource.meta.client.put_object(Body=pk_bytes, Bucket=AWS_S3_BUCKET_NAME, Key=s3_key,
-                                           ACL='public-read')
+def create_apple_wallet_card(vcard_info):
+    card_info = Generic()
+
+    membership_year = vcard_info['membership_year']
+    membership_expiration = vcard_info['membership_expiration']
+    ducati_member_code = vcard_info['ducati_member_code']
+    english_full_name = vcard_info['english_full_name']
+    hebrew_full_name = vcard_info['hebrew_full_name']
+    registration_type = vcard_info['registration_type']
+    motorcycle_model = vcard_info['motorcycle_model']
+
+    card_info.add_header_field('year', membership_year, 'year')
+    card_info.add_primary_field('code', ducati_member_code, 'ducati_code')
+    card_info.add_secondary_field('Name', english_full_name, 'Name')
+    card_info.add_secondary_field('local_name', hebrew_full_name, 'שם')
+    card_info.add_auxiliary_field('type', registration_type, 'membership_type')
+    card_info.add_auxiliary_field('bike', motorcycle_model, 'bike')
+    if vcard_info.get('revoked'):
+        card_info.add_back_field('note', f'Membership expired - חברות לא בתוקף', '')
+    else:
+        card_info.add_back_field('note', f'Membership valid until {membership_expiration}', '')
+
+    apple_pass_client = ApplePassGeneratorClient(APPLE_CARD_TEAM_IDENTIFIER, APPLE_CARD_PASS_TYPE_IDENTIFIER, APPLE_CARD_ORGANIZATION_NAME)
+    apple_pass = apple_pass_client.get_pass(card_info)
+    apple_pass.background_color = 'rgb(204,0,0)'
+    apple_pass.logo_text = 'DOC_Israel_Card'
+    apple_pass.foreground_color = 'rgb(255,255,255)'
+    apple_pass.label_color = 'rgb(255,255,255)'
+
+    resource_dir_path = os.path.join(SCRIPT_DIR, 'resources')
+    resources = {
+        "logo.png": os.path.join(resource_dir_path, 'assets', 'doc.png'),
+        "logo@2x.png": os.path.join(resource_dir_path, 'assets', 'doc@2x.png'),
+        "logo@3x.png": os.path.join(resource_dir_path, 'assets', 'doc@3x.png'),
+        "icon.png": os.path.join(resource_dir_path, 'assets', 'doc_il.png'),
+        "thumbnail.png": os.path.join(resource_dir_path, 'assets', 'doc_il.png'),
+        "thumbnail@2x.png": os.path.join(resource_dir_path, 'assets', 'doc_il@2x.png'),
+        "thumbnail@3x.png": os.path.join(resource_dir_path, 'assets', 'doc_il@3x.png'),
+        "en.lproj/pass.strings": os.path.join(resource_dir_path, 'en.lproj', 'pass.strings'),
+        "he.lproj/pass.strings": os.path.join(resource_dir_path, 'he.lproj', 'pass.strings'),
+    }
+
+    for resource_name, resource_file_path in resources.items():
+        with open(resource_file_path, 'rb') as f:
+            apple_pass.add_file(resource_name, f)
+
+    with tempfile.TemporaryDirectory() as temp_dir_path:
+        private_key_file_path = os.path.join(temp_dir_path, 'key.pem')
+
+        with open(private_key_file_path, 'w+') as f:
+            f.write(APPLE_CARD_PKPASS_PRIVATE_KEY)
+
+        certificate_file_path = os.path.join(resource_dir_path, 'certs', 'certificate.pem')
+        wwdr_certificate_file_path = os.path.join(resource_dir_path, 'certs', 'wwdr.pem')
+        apple_card = apple_pass.create(certificate_file_path,
+                                       private_key_file_path,
+                                       wwdr_certificate_file_path,
+                                       APPLE_CARD_PKPASS_PRIVATE_KEY_PASSWORD)
+
+        apple_card.seek(0)
+        return apple_card.read()
 
 
 def main():
@@ -164,22 +230,35 @@ def main():
             role = item['תפקיד'].strip()
             hebrew_full_name = item['שם מלא בעברית'].strip()
             english_full_name = item['שם מלא באנגלית'].strip()
+            tags = item['אישור'].strip().split(',')
             motorcycle_model = item['דגם אופנוע נוכחי'].strip()
+            membership_expiration = item['תפוגה'].strip()
+            try:
+                membership_expiration = datetime.datetime.strptime(membership_expiration, "%Y-%m-%d")
+            except:
+                membership_expiration = datetime.datetime(2000, 1, 1)
+
+            now = datetime.datetime.now()
             registration_type = 'זוגי' if item['יחיד או זוג'].lower().strip() == 'y' else 'יחיד'
-            revoked = item['עזב'].lower().strip() in ['y', 'rip']
+            revoked = item['עזב'].lower().strip() in ['y', 'rip'] or now > membership_expiration
             vcard_id = f'{email_address}:{phone_number}'
             vcard_id = vcard_id.encode()
             vcard_id = hashlib.sha1(vcard_id).hexdigest()
             short_vcard_id = vcard_id[:10]
 
             bot_status = item.get(HEADER_BOT_STATUS, '').strip()
+            if bot_status == STATUS_UPDATE_TYPO:
+                bot_status = STATUS_UPDATE
+
             if bot_status in [STATUS_ISSUE, STATUS_UPDATE]:
                 vcard_info = {
                     "hebrew_full_name": hebrew_full_name,
                     "english_full_name": english_full_name,
                     "membership_year": membership_year,
+                    "membership_expiration": membership_expiration.strftime('%Y-%m-%d'),
                     "ducati_member_code": ducati_member_code,
                     "role": role,
+                    "tags": tags,
                     "motorcycle_model": motorcycle_model,
                     "registration_type": registration_type,
                 }
@@ -192,7 +271,8 @@ def main():
                 vcard_info_json_encoded = vcard_info_json.encode('utf-8')
                 aws_s3_resource.meta.client.put_object(Body=vcard_info_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
 
-                create_apple_card_file(vcard_info, f'apple_card/{vcard_id}.pkpass')
+                apple_wallet_card = create_apple_wallet_card(vcard_info)
+                aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
 
                 short_url_info = json.dumps({
                     'id': vcard_id
