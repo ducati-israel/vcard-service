@@ -28,6 +28,7 @@ APPLE_CARD_PKPASS_PRIVATE_KEY_PASSWORD = os.environ['APPLE_CARD_PRIVATE_KEY_PASS
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 HEADER_BOT_STATUS = 'סטטוס בוט'
+HEADER_LAST_RENEWAL_REMINDER_DATE = 'תאריך תזכורת חידוש אחרון'
 STATUS_UPDATE = 'עדכון'
 STATUS_UPDATE_TYPO = 'עידכון'
 STATUS_ISSUE = 'הנפקה'
@@ -71,38 +72,9 @@ def normalize_email_address(email_address):
     return email_address.lower().strip()
 
 
-EMAIL_TEMPLATE_SUCCESS = '''
-היי {{hebrew_full_name}},
-שמחים שהצטרפת למועדון דוקאטי!
-
-הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
-
-אנא שמור על כתובת זו במועדפים.
-
-אנא הצג כרטיס זה בעת קבלת שירות או טיפול או רכישת אביזרים כדי לקבל את ההטבות המגיעות לחברי המועדון.
-שים לב לתוקף הרשום על הכרטיס: בגלל נהלי דוקאטי, שנת החברות תמיד מסתיימת בסוף אוקטובר של השנה המופיעה על הכרטיס.
-
-<img width="180" src="https://card.docil.co.il/preview.png">
-'''
-
-
 def send_sms(phone_number, sms_message, sender_id=SMS_SENDER_ID):
     number = normalize_phone_number(phone_number)
     aws_sns_client.publish(PhoneNumber=number, Message=sms_message, MessageAttributes={'AWS.SNS.SMS.SenderID': {'DataType': 'String', 'StringValue': sender_id}, 'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}})
-
-
-SMS_TEMPLATE_SUCCESS = '''
-היי {{hebrew_full_name}},
-שמחים שהצטרפת למועדון דוקאטי!
-הונפק לך כרטיס חבר דיגיטלי
-{{card_url}}
-'''
-
-TEMPLATE_MISSING_DUCATI_MEMBER_CODE = '''
-שים לב: הכרטיס הדיגיטלי שלך איננו מכיל מספר חבר כיוון שלא ביצעת רישום לאתר של דוקאטי העולמית.
-אנא גש לאתר המועדון בלינק הבא ובצע את הרישום לאתר של דוקאטי. לאחר מכן כרטיסך יעודכן עם מספר החבר החדש שלך:
-https://www.docil.co.il/newreg
-'''.strip()
 
 
 def send_email(email_subject, email_text, recipient_email_address, sender_email_address=EMAIL_ADDRESS_SENDER, reply_to_email_address=None):
@@ -238,6 +210,12 @@ def main():
             except:
                 membership_expiration = datetime.datetime(2000, 1, 1)
 
+            last_renewal_reminder_date = item[HEADER_LAST_RENEWAL_REMINDER_DATE].strip()
+            try:
+                last_renewal_reminder_date = datetime.datetime.strptime(last_renewal_reminder_date, "%Y-%m-%d")
+            except:
+                last_renewal_reminder_date = datetime.datetime(2000, 1, 1)
+
             now = datetime.datetime.now()
             registration_type = 'זוגי' if item['יחיד או זוג'].lower().strip() == 'y' else 'יחיד'
             revoked = item['עזב'].lower().strip() in ['y', 'rip'] or now > membership_expiration
@@ -281,25 +259,22 @@ def main():
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
                 if not revoked and bot_status != STATUS_UPDATE:
-                    is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
-
-                    short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
-                    sms_message = SMS_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
-                    if is_invalid_ducati_member_code:
-                        sms_message = f'{sms_message}\n{TEMPLATE_MISSING_DUCATI_MEMBER_CODE}'
-
-                    send_sms(phone_number, sms_message)
-
-                    email_message = EMAIL_TEMPLATE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
-                    if is_invalid_ducati_member_code:
-                        email_message = f'{email_message}\n{TEMPLATE_MISSING_DUCATI_MEMBER_CODE}'
-
-                    send_email(EMAIL_SUBJECT, email_message, email_address)
+                    _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id)
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
                 time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
                 logging.info(f'issued card for line #{index}')
+
+            if not revoked:
+                days_till_expiration = (membership_expiration - now).days
+                if 0 < days_till_expiration <= 30:
+                    days_since_last_renewal_reminder_date = (now - last_renewal_reminder_date).days
+                    if days_since_last_renewal_reminder_date > 10:
+                        _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
+                        logging.info(f'renewal notice sent for line #{index}')
+                        value = now.strftime("%Y-%m-%d")
+                        google_sheets_client.set_item_field(item, HEADER_LAST_RENEWAL_REMINDER_DATE, value)
 
         except:
             logging.exception(f'failed issuing card for line #{index}')
@@ -307,6 +282,93 @@ def main():
             google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
             time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
 
+
+def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id):
+    is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
+    short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
+    sms_message = SMS_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+    if is_invalid_ducati_member_code:
+        sms_message = f'{sms_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
+    send_sms(phone_number, sms_message)
+    email_message = EMAIL_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+    if is_invalid_ducati_member_code:
+        email_message = f'{email_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
+    send_email(EMAIL_SUBJECT, email_message, email_address)
+
+
+def _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration):
+    membership_expiration = f'{membership_expiration.strftime("%d/%m/%Y")} (בעוד {days_till_expiration} ימים)'
+    sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration)
+    send_sms(phone_number, sms_message)
+    email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration)
+    send_email(EMAIL_SUBJECT, email_message, email_address)
+
+
+EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
+היי {{hebrew_full_name}},
+שמחים שהצטרפת למועדון דוקאטי!
+
+הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
+
+אנא שמור על כתובת זו במועדפים.
+
+אנא הצג כרטיס זה בעת קבלת שירות או טיפול או רכישת אביזרים כדי לקבל את ההטבות המגיעות לחברי המועדון.
+שים לב לתוקף הרשום על הכרטיס: בגלל נהלי דוקאטי, שנת החברות תמיד מסתיימת בסוף אוקטובר של השנה המופיעה על הכרטיס.
+
+<img width="180" src="https://card.docil.co.il/preview.png">
+'''
+
+SMS_TEMPLATE_ISSUE_SUCCESS = '''
+היי {{hebrew_full_name}},
+שמחים שהצטרפת למועדון דוקאטי!
+הונפק לך כרטיס חבר דיגיטלי
+{{card_url}}
+'''
+
+TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE = '''
+שים לב: הכרטיס הדיגיטלי שלך איננו מכיל מספר חבר כיוון שלא ביצעת רישום לאתר של דוקאטי העולמית.
+אנא גש לאתר המועדון בלינק הבא ובצע את הרישום לאתר של דוקאטי. לאחר מכן כרטיסך יעודכן עם מספר החבר החדש שלך:
+https://www.docil.co.il/newreg
+'''.strip()
+
+SMS_TEMPLATE_RENEWAL_REQUEST = '''
+היי {{hebrew_full_name}},
+זו הודעה ממועדון דוקאטי בישראל.
+
+בתאריך {{membership_expiration}} תפוג החברות שלך במועדון.
+כדי לא לאבד את הותק שלך ואת ההטבות של המועדון עליך לחדש חברות וזאת לפני שהיא תפוג.
+
+לחידוש חברות במועדון, לחץ על הקישור לטופס בהמשך. יש לשים לב שבטופס צריך לסמן "הייתי כבר חבר" ולהכניס את מספר החבר שלך.
+
+לנוחיותך, מספר החבר שלך במועדון: {{ducati_member_code}}.
+
+טופס הרשמה\חידוש חברות - https://www.docil.co.il/register
+
+---
+
+קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://www.docil.co.il/?page_id=19
+'''
+
+EMAIL_TEMPLATE_RENEWAL_REQUEST = '''
+היי {{hebrew_full_name}},
+זו הודעה ממועדון דוקאטי בישראל.
+
+בתאריך {{membership_expiration}} תפוג החברות שלך במועדון.
+כדי לא לאבד את הותק שלך ואת ההטבות של המועדון עליך לחדש חברות וזאת לפני שהיא תפוג.
+
+לחידוש חברות במועדון, לחץ על הקישור לטופס בהמשך. יש לשים לב שבטופס צריך לסמן "הייתי כבר חבר" ולהכניס את מספר החבר שלך.
+
+לנוחיותך, מספר החבר שלך במועדון: {{ducati_member_code}}.
+
+טופס הרשמה\חידוש חברות - https://www.docil.co.il/register
+
+---
+
+קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://www.docil.co.il/?page_id=19
+
+<img width="180" src="https://card.docil.co.il/preview.png">
+
+'''
 
 if __name__ == '__main__':
     main()
