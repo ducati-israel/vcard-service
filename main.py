@@ -301,10 +301,21 @@ def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name
 
 
 def _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration):
+    is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
+
     membership_expiration = f'{membership_expiration.strftime("%d/%m/%Y")} (בעוד {days_till_expiration} ימים)'
-    sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+    if is_invalid_ducati_member_code:
+        sms_message = SMS_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+    else:
+        sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+
     send_sms(phone_number, sms_message)
-    email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+
+    if is_invalid_ducati_member_code:
+        email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+    else:
+        email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+
     send_email(EMAIL_SUBJECT_RENEWAL_REQUEST, email_message, email_address)
 
 
@@ -355,6 +366,24 @@ SMS_TEMPLATE_RENEWAL_REQUEST = '''
 https://wa.me/{{contact_phone_number}}
 '''
 
+SMS_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE = '''
+היי {{hebrew_full_name}},
+זו הודעה ממועדון דוקאטי בישראל.
+
+בתאריך {{membership_expiration}} תפוג החברות שלך במועדון.
+כדי לא לאבד את הותק שלך ואת ההטבות של המועדון עליך לחדש חברות וזאת לפני שהיא תפוג.
+
+לחידוש חברות במועדון, לחץ על הקישור לטופס בהמשך. יש לשים לב שבטופס צריך לסמן "הייתי כבר חבר". שמנו לב שעדיין לא סיפקת מספר חבר באתר דוקאטי העולמי ונבקש שבאותה הזדמנות תעשה זאת.
+
+טופס הרשמה\חידוש חברות - https://www.docil.co.il/register
+
+---
+
+קיבלת הודעה זו כיוון שאישרת קבלת הודעות אלקטרוניות. 
+במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא שלח "הסר" בוואטסאפ למספר הבא:
+https://wa.me/{{contact_phone_number}}
+'''
+
 EMAIL_TEMPLATE_RENEWAL_REQUEST = '''
 היי {{hebrew_full_name}},
 זו הודעה ממועדון דוקאטי בישראל.
@@ -365,6 +394,27 @@ EMAIL_TEMPLATE_RENEWAL_REQUEST = '''
 לחידוש חברות במועדון, לחץ על הקישור לטופס בהמשך. יש לשים לב שבטופס צריך לסמן "הייתי כבר חבר" ולהכניס את מספר החבר שלך.
 
 לנוחיותך, מספר החבר שלך במועדון: {{ducati_member_code}}.
+
+טופס הרשמה\חידוש חברות - https://www.docil.co.il/register
+
+---
+
+קיבלת הודעה זו כיוון שאישרת קבלת הודעות אלקטרוניות. 
+במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא שלח "הסר" בוואטסאפ למספר הבא:
+https://wa.me/{{contact_phone_number}}
+
+<img width="180" src="https://card.docil.co.il/preview.png">
+
+'''
+
+EMAIL_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE = '''
+היי {{hebrew_full_name}},
+זו הודעה ממועדון דוקאטי בישראל.
+
+בתאריך {{membership_expiration}} תפוג החברות שלך במועדון.
+כדי לא לאבד את הותק שלך ואת ההטבות של המועדון עליך לחדש חברות וזאת לפני שהיא תפוג.
+
+לחידוש חברות במועדון, לחץ על הקישור לטופס בהמשך. יש לשים לב שבטופס צריך לסמן "הייתי כבר חבר". שמנו לב שעדיין לא סיפקת מספר חבר באתר דוקאטי העולמי ונבקש שבאותה הזדמנות תעשה זאת.
 
 טופס הרשמה\חידוש חברות - https://www.docil.co.il/register
 
