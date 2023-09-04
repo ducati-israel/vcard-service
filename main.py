@@ -35,7 +35,8 @@ STATUS_ISSUE = 'הנפקה'
 STATUS_DONE = 'בוצע'
 STATUS_ERROR = 'שגיאה'
 
-EMAIL_SUBJECT = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
+EMAIL_SUBJECT_ISSUE = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
+EMAIL_SUBJECT_RENEWAL_REQUEST = 'מועדון דוקאטי ישראל - בקרוב תפוג החברות שלך במועדון'
 EMAIL_ADDRESS_SENDER = "Ducati Israel <noreply@docil.co.il>"
 
 SMS_SENDER_ID = 'Ducati'
@@ -47,8 +48,11 @@ AWS_ACCESS_KEY_ID = os.environ['AWS_ACCESS_KEY_ID']
 AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 AWS_SNS_REGION = os.environ['AWS_SNS_REGION']
 AWS_SES_REGION = os.environ['AWS_SES_REGION']
+CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
 
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
+RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 30
+RENEWAL_NOTIFICATIONS_TTL_DAYS = 10
 
 aws_session = boto3.Session(aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 aws_s3_resource = aws_session.resource('s3')
@@ -268,11 +272,11 @@ def main():
 
             if not revoked:
                 days_till_expiration = (membership_expiration - now).days
-                if 0 < days_till_expiration <= 30:
+                if 0 < days_till_expiration <= RENEWAL_NOTIFICATIONS_PERIOD_DAYS:
                     days_since_last_renewal_reminder_date = (now - last_renewal_reminder_date).days
-                    if days_since_last_renewal_reminder_date > 10:
-                        _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
+                    if days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
                         logging.info(f'renewal notice sent for line #{index}')
+                        _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
                         value = now.strftime("%Y-%m-%d")
                         google_sheets_client.set_item_field(item, HEADER_LAST_RENEWAL_REMINDER_DATE, value)
 
@@ -293,15 +297,15 @@ def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name
     email_message = EMAIL_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
     if is_invalid_ducati_member_code:
         email_message = f'{email_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
-    send_email(EMAIL_SUBJECT, email_message, email_address)
+    send_email(EMAIL_SUBJECT_ISSUE, email_message, email_address)
 
 
 def _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration):
     membership_expiration = f'{membership_expiration.strftime("%d/%m/%Y")} (בעוד {days_till_expiration} ימים)'
-    sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration)
+    sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
     send_sms(phone_number, sms_message)
-    email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration)
-    send_email(EMAIL_SUBJECT, email_message, email_address)
+    email_message = EMAIL_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+    send_email(EMAIL_SUBJECT_RENEWAL_REQUEST, email_message, email_address)
 
 
 EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
@@ -346,7 +350,7 @@ SMS_TEMPLATE_RENEWAL_REQUEST = '''
 
 ---
 
-קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://www.docil.co.il/?page_id=19
+קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://wa.me/{{contact_phone_number}}
 '''
 
 EMAIL_TEMPLATE_RENEWAL_REQUEST = '''
@@ -364,7 +368,7 @@ EMAIL_TEMPLATE_RENEWAL_REQUEST = '''
 
 ---
 
-קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://www.docil.co.il/?page_id=19
+קיבלת הודעה זו כיוון ואישרת קבלת הודעות אלקטרוניות. במידה ואינך מעוניין להמשיך חברותך במועדון ו/או לקבל הודעות נוספות אנא צור קשר באמצעות https://wa.me/{{contact_phone_number}}
 
 <img width="180" src="https://card.docil.co.il/preview.png">
 
