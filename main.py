@@ -39,7 +39,7 @@ EMAIL_SUBJECT_ISSUE = 'מועדון דוקאטי ישראל - כרטיס חבר 
 EMAIL_SUBJECT_RENEWAL_REQUEST = 'מועדון דוקאטי ישראל - בקרוב תפוג החברות שלך במועדון'
 EMAIL_ADDRESS_SENDER = "Ducati Israel <noreply@docil.co.il>"
 
-SMS_SENDER_ID = 'Ducati'
+SMS_SENDER_ID = 'DOCIL'
 
 GOOGLE_SPREADSHEET_ID = os.environ['GOOGLE_SPREADSHEET_ID']
 GOOGLE_SERVICE_ACCOUNT_CREDENTIALS = os.environ['GOOGLE_SERVICE_ACCOUNT_CREDENTIALS']
