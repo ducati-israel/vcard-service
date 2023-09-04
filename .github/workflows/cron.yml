@@ -38,7 +38,7 @@ jobs:
           AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
           APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
           APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
-
+          CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
       - name: Run Sync
         run: |
           python3 main.py
@@ -52,3 +52,4 @@ jobs:
           AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
           APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
           APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
+          CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
