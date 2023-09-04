@@ -272,7 +272,7 @@ def main():
 
             if not revoked:
                 days_till_expiration = (membership_expiration - now).days
-                if 0 < days_till_expiration <= RENEWAL_NOTIFICATIONS_PERIOD_DAYS:
+                if 0 <= days_till_expiration <= RENEWAL_NOTIFICATIONS_PERIOD_DAYS:
                     days_since_last_renewal_reminder_date = (now - last_renewal_reminder_date).days
                     if days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
                         logging.info(f'renewal notice sent for line #{index}')
