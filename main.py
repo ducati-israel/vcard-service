@@ -279,6 +279,7 @@ def main():
                         _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
                         value = now.strftime("%Y-%m-%d")
                         google_sheets_client.set_item_field(item, HEADER_LAST_RENEWAL_REMINDER_DATE, value)
+                        time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
 
         except:
             logging.exception(f'failed issuing card for line #{index}')
