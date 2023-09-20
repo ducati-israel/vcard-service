@@ -53,6 +53,7 @@ CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
 RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 60
 RENEWAL_NOTIFICATIONS_TTL_DAYS = 10
+MAX_DOCUMENT_UPDATES = 25
 
 aws_session = boto3.Session(aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 aws_s3_resource = aws_session.resource('s3')
@@ -183,8 +184,12 @@ def create_apple_wallet_card(vcard_info):
 def main():
     logging.basicConfig(level=logging.INFO)
     google_sheets_client.reload()
-
+    total_document_updates_count = 0
     for index, item in enumerate(google_sheets_client.items):
+        if total_document_updates_count >= MAX_DOCUMENT_UPDATES:
+            logging.info(f'stopping. reached max document updates ({total_document_updates_count})')
+            return
+
         bot_status = ''
         try:
             email_address = item['כתובת אימייל']
@@ -266,9 +271,10 @@ def main():
                     _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id)
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
+                logging.info(f'issued card for line #{index}')
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
                 time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
-                logging.info(f'issued card for line #{index}')
+                total_document_updates_count += 1
 
             if not revoked:
                 days_till_expiration = (membership_expiration - now).days
@@ -280,12 +286,14 @@ def main():
                         value = now.strftime("%Y-%m-%d")
                         google_sheets_client.set_item_field(item, HEADER_LAST_RENEWAL_REMINDER_DATE, value)
                         time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
+                        total_document_updates_count += 1
 
         except:
             logging.exception(f'failed issuing card for line #{index}')
             new_status = f'{bot_status} - {STATUS_ERROR}' if bot_status else STATUS_ERROR
             google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
             time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
+            total_document_updates_count += 1
 
 
 def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id):
