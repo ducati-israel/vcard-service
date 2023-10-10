@@ -280,7 +280,7 @@ def main():
                 days_till_expiration = (membership_expiration - now).days
                 if 0 <= days_till_expiration <= RENEWAL_NOTIFICATIONS_PERIOD_DAYS:
                     days_since_last_renewal_reminder_date = (now - last_renewal_reminder_date).days
-                    if days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
+                    if False and days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
                         logging.info(f'renewal notice sent for line #{index}')
                         _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
                         value = now.strftime("%Y-%m-%d")
