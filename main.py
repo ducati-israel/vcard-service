@@ -51,8 +51,8 @@ AWS_SES_REGION = os.environ['AWS_SES_REGION']
 CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
 
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
-RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 60
-RENEWAL_NOTIFICATIONS_TTL_DAYS = 10
+RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 31
+RENEWAL_NOTIFICATIONS_TTL_DAYS = 15
 MAX_DOCUMENT_UPDATES = 25
 
 aws_session = boto3.Session(aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
@@ -280,7 +280,7 @@ def main():
                 days_till_expiration = (membership_expiration - now).days
                 if 0 <= days_till_expiration <= RENEWAL_NOTIFICATIONS_PERIOD_DAYS:
                     days_since_last_renewal_reminder_date = (now - last_renewal_reminder_date).days
-                    if False and days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
+                    if days_since_last_renewal_reminder_date >= RENEWAL_NOTIFICATIONS_TTL_DAYS:
                         logging.info(f'renewal notice sent for line #{index}')
                         _send_renewal_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, membership_expiration, days_till_expiration)
                         value = now.strftime("%Y-%m-%d")
