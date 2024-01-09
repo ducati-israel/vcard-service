@@ -199,7 +199,7 @@ def main():
 
             email_address = normalize_email_address(email_address)
 
-            phone_number = item['מספר טלפון סלולרי']
+            phone_number = item['טלפון סלולרי']
             if not phone_number:
                 logging.debug(f'skipping line {index}, empty phone')
                 continue
@@ -226,7 +226,7 @@ def main():
                 last_renewal_reminder_date = datetime.datetime(2000, 1, 1)
 
             now = datetime.datetime.now()
-            registration_type = 'זוגי' if item['יחיד או זוג'].lower().strip() == 'y' else 'יחיד'
+            registration_type = 'זוגי' if item['זוגי'].lower().strip() == 'y' else 'יחיד'
             revoked = item['עזב'].lower().strip() in ['y', 'rip'] or now > membership_expiration
             vcard_id = f'{email_address}:{phone_number}'
             vcard_id = vcard_id.encode()
