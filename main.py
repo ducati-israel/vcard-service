@@ -78,6 +78,7 @@ def normalize_email_address(email_address):
 
 
 def send_sms(phone_number, sms_message, sender_id=SMS_SENDER_ID):
+    return # disabled
     number = normalize_phone_number(phone_number)
     aws_sns_client.publish(PhoneNumber=number, Message=sms_message, MessageAttributes={'AWS.SNS.SMS.SenderID': {'DataType': 'String', 'StringValue': sender_id}, 'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}})
 
