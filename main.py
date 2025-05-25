@@ -9,6 +9,8 @@ import boto3
 import json
 import dotenv
 import phonenumbers
+from googleapiclient.discovery import build
+from google.oauth2.service_account import Credentials
 from gdolim import GoogleSheetsClient
 from botocore.exceptions import ClientError
 from email.mime.multipart import MIMEMultipart
@@ -182,6 +184,113 @@ def create_apple_wallet_card(vcard_info):
         return apple_card.read()
 
 
+def create_google_wallet_object(vcard_info: dict, vcard_id: str):
+    """
+    Creates a Google Wallet Generic Object for a vCard.
+
+    Args:
+        vcard_info: Dictionary containing the vCard information.
+        vcard_id: The unique ID for this vCard (SHA1 hash).
+
+    Returns:
+        The save URI for the Google Wallet object, or None if an error occurred.
+    """
+    try:
+        # Load credentials and configuration from environment variables
+        credentials_json_str = os.environ.get('GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS')
+        issuer_id = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+        class_id = os.environ.get('GOOGLE_WALLET_CLASS_ID') # Full class ID, e.g., issuer_id.className
+
+        if not all([credentials_json_str, issuer_id, class_id]):
+            logging.error("Google Wallet environment variables not fully set (CREDENTIALS, ISSUER_ID, CLASS_ID).")
+            return None
+
+        try:
+            credentials_info = json.loads(credentials_json_str)
+            credentials = Credentials.from_service_account_info(
+                credentials_info,
+                scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+            )
+        except json.JSONDecodeError:
+            logging.error("Error: GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS is not valid JSON.")
+            return None
+        
+        object_id = f"{issuer_id}.{vcard_id}"
+
+        # Prepare GenericObject payload
+        generic_object_payload = {
+            "id": object_id,
+            "classId": class_id,
+            "state": "EXPIRED" if vcard_info.get('revoked') else "ACTIVE",
+            "textModulesData": [
+                {
+                    "id": "english_full_name",
+                    "header": "MEMBER NAME",
+                    "body": vcard_info.get('english_full_name', 'N/A')
+                },
+                {
+                    "id": "ducati_member_code",
+                    "header": "MEMBER ID",
+                    "body": vcard_info.get('ducati_member_code', 'N/A')
+                },
+                {
+                    "id": "membership_expiration",
+                    "header": "EXPIRES",
+                    "body": vcard_info.get('membership_expiration', 'N/A') # Expects YYYY-MM-DD
+                },
+                {
+                    "id": "motorcycle_model",
+                    "header": "MOTORCYCLE",
+                    "body": vcard_info.get('motorcycle_model', 'N/A')
+                },
+                {
+                    "id": "membership_year",
+                    "header": "MEMBERSHIP YEAR",
+                    "body": vcard_info.get('membership_year', 'N/A')
+                }
+            ],
+            # "logo": {}, # Optional: Override class logo
+            # "heroImage": {}, # Optional: Image for the pass, different from class logo
+            # "linksModuleData": { # Optional
+            # "uris": [
+            # {
+            # "uri": "http://www.docil.co.il",
+            # "description": "DOC Israel Website",
+            # "id": "docIsraelWebsite"
+            # }
+            # ]
+            # }
+        }
+
+        service = build('walletobjects', 'v1', credentials=credentials)
+
+        try:
+            response = service.genericobject().insert(body=generic_object_payload).execute()
+            logging.info(f"Google Wallet object {object_id} created successfully.")
+            return response.get('saveUri')
+        except Exception as e:
+            if hasattr(e, 'resp') and e.resp.status == 409: # Conflict, object already exists
+                logging.warning(f"Google Wallet object {object_id} already exists. Attempting to retrieve.")
+                try:
+                    response = service.genericobject().get(resourceId=object_id).execute()
+                    logging.info(f"Retrieved existing Google Wallet object {object_id}.")
+                    return response.get('saveUri')
+                except Exception as get_e:
+                    logging.error(f"Error retrieving existing Google Wallet object {object_id}: {get_e}")
+                    if hasattr(get_e, 'content'):
+                        logging.error(f"Error content: {get_e.content}")
+                    return None
+            else:
+                logging.error(f"Error creating Google Wallet object {object_id}: {e}")
+                if hasattr(e, 'content'):
+                    logging.error(f"Error content: {e.content}")
+                return None
+
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred in create_google_wallet_object for vcard_id {vcard_id}: {e}")
+        return None
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
     google_sheets_client.reload()
@@ -262,6 +371,28 @@ def main():
                 apple_wallet_card = create_apple_wallet_card(vcard_info)
                 aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
 
+                # Create Google Wallet Object
+                google_wallet_save_uri = create_google_wallet_object(vcard_info, vcard_id)
+                if google_wallet_save_uri:
+                    logging.info(f"Google Wallet Save URI for {vcard_id}: {google_wallet_save_uri}")
+                    # Store the Google Wallet save URI to S3
+                    try:
+                        uri_info = {"googleWalletSaveUri": google_wallet_save_uri}
+                        uri_info_json_encoded = json.dumps(uri_info).encode('utf-8')
+                        s3_key = f'google_wallet_links/{vcard_id}.json'
+                        aws_s3_resource.meta.client.put_object(
+                            Body=uri_info_json_encoded,
+                            Bucket=AWS_S3_BUCKET_NAME,
+                            Key=s3_key,
+                            ACL='public-read' # Assuming public read, adjust if needed
+                        )
+                        logging.info(f"Successfully uploaded Google Wallet link info to S3: {s3_key}")
+                    except Exception as e:
+                        logging.exception(f"Failed to upload Google Wallet link info to S3 for {vcard_id}: {e}")
+                else:
+                    logging.error(f"Failed to create Google Wallet Object for {vcard_id}, so no link to upload.")
+
+
                 short_url_info = json.dumps({
                     'id': vcard_id
                 })
@@ -269,7 +400,7 @@ def main():
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
                 if not revoked and bot_status != STATUS_UPDATE:
-                    _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id)
+                    _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id, google_wallet_save_uri)
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
                 logging.info(f'issued card for line #{index}')
@@ -297,14 +428,32 @@ def main():
             total_document_updates_count += 1
 
 
-def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id):
+def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id, google_wallet_url):
     is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
-    short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
-    sms_message = SMS_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+    short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}' # This is for Apple Wallet / general card view
+
+    # Prepare SMS message
+    current_sms_template = SMS_TEMPLATE_ISSUE_SUCCESS
+    if google_wallet_url:
+        current_sms_template = current_sms_template.replace('{{google_wallet_url}}', google_wallet_url)
+    else:
+        # Remove the Google Wallet line entirely if no URL, including its trailing newline
+        current_sms_template = re.sub(r"Google Wallet: \{\{google_wallet_url\}\}\n?", "", current_sms_template).strip()
+    
+    sms_message = current_sms_template.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
     if is_invalid_ducati_member_code:
         sms_message = f'{sms_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
     send_sms(phone_number, sms_message)
-    email_message = EMAIL_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+
+    # Prepare Email message
+    current_email_template = EMAIL_TEMPLATE_ISSUE_SUCCESS
+    if google_wallet_url:
+        current_email_template = current_email_template.replace('{{google_wallet_url}}', google_wallet_url)
+    else:
+        # Remove the Google Wallet line entirely if no URL, including its trailing newline
+        current_email_template = re.sub(r"הוסף ל-Google Wallet: \{\{google_wallet_url\}\}\n?", "", current_email_template).strip()
+
+    email_message = current_email_template.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
     if is_invalid_ducati_member_code:
         email_message = f'{email_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
     send_email(EMAIL_SUBJECT_ISSUE, email_message, email_address)
@@ -333,9 +482,10 @@ EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
 היי {{hebrew_full_name}},
 שמחים שהצטרפת למועדון דוקאטי!
 
-הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
+הונפק לך כרטיס חבר דיגיטלי (Apple Wallet וצפייה כללית) בכתובת {{card_url}}
+הוסף ל-Google Wallet: {{google_wallet_url}}
 
-אנא שמור על כתובת זו במועדפים.
+אנא שמור על כתובות אלו במועדפים.
 
 אנא הצג כרטיס זה בעת קבלת שירות או טיפול או רכישת אביזרים כדי לקבל את ההטבות המגיעות לחברי המועדון.
 שים לב לתוקף הרישום שלך. כחודש לפני תום החברות תקבל התראה לחידוש. במידה ולא תחדש למרות ההתראות, החברות שלך תפוג תוקף אוטומטית.
@@ -346,8 +496,9 @@ EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
 SMS_TEMPLATE_ISSUE_SUCCESS = '''
 היי {{hebrew_full_name}},
 שמחים שהצטרפת למועדון דוקאטי!
-הונפק לך כרטיס חבר דיגיטלי
+כרטיס חבר דיגיטלי (Apple/כללי):
 {{card_url}}
+Google Wallet: {{google_wallet_url}}
 '''
 
 TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE = '''
