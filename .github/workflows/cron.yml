@@ -19,30 +19,27 @@ jobs:
 
       - uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.13'
 
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r ./requirements.txt
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          virtualenvs-path: .venv
+          installer-parallel: true
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
 
       - name: Run Unit Tests
         run: |
-          python3 tests.py
-        env:
-          GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: "${{secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}}"
-          GOOGLE_SPREADSHEET_ID: "${{secrets.GOOGLE_SPREADSHEET_ID}}"
-          AWS_ACCESS_KEY_ID: "${{secrets.AWS_ACCESS_KEY_ID}}"
-          AWS_SECRET_ACCESS_KEY: "${{secrets.AWS_SECRET_ACCESS_KEY}}"
-          AWS_SNS_REGION: "eu-central-1"
-          AWS_SES_REGION: "us-east-1"
-          AWS_S3_BUCKET_NAME: "ducati-israel-vcard"
-          APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
-          APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
-          CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
+          poetry run python tests.py
+
       - name: Run Sync
         run: |
-          python3 main.py
+          poetry run python -m vcard
         env:
           GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: "${{secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}}"
           GOOGLE_SPREADSHEET_ID: "${{secrets.GOOGLE_SPREADSHEET_ID}}"
@@ -54,3 +51,5 @@ jobs:
           APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
           APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
           CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
+          GOOGLE_WALLET_ISSUER_ID: "3388000000022937159"
+          GOOGLE_WALLET_CLASS_ID: "3388000000022937159.DOCIL"
