@@ -35,8 +35,8 @@ STATUS_ISSUE = 'הנפקה'
 STATUS_DONE = 'בוצע'
 STATUS_ERROR = 'שגיאה'
 
-EMAIL_SUBJECT_ISSUE = 'מועדון דוקאטי ישראל - כרטיס חבר וירטואלי'
-EMAIL_SUBJECT_RENEWAL_REQUEST = 'מועדון דוקאטי ישראל - בקרוב תפוג החברות שלך במועדון'
+EMAIL_SUBJECT_ISSUE = 'כרטיס החבר שלך במועדון דוקאטי ישראל'
+EMAIL_SUBJECT_RENEWAL_REQUEST = 'בקרוב תפוג החברות שלך במועדון דוקאטי ישראל'
 EMAIL_ADDRESS_SENDER = "Ducati Israel <noreply@docil.co.il>"
 
 SMS_SENDER_ID = 'DOCIL'
@@ -269,7 +269,7 @@ def main():
                 aws_s3_resource.meta.client.put_object(Body=short_url_info, Bucket=AWS_S3_BUCKET_NAME, Key=f'short/{short_vcard_id}.json', ACL='public-read')
 
                 if not revoked and bot_status != STATUS_UPDATE:
-                    _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id)
+                    _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id, membership_expiration)
 
                 new_status = f'{bot_status} - {STATUS_DONE}'
                 logging.info(f'issued card for line #{index}')
@@ -297,14 +297,15 @@ def main():
             total_document_updates_count += 1
 
 
-def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id):
+def _send_issue_notification(ducati_member_code, email_address, hebrew_full_name, phone_number, short_vcard_id, membership_expiration):
     is_invalid_ducati_member_code = not re.match(r'^\d+$', ducati_member_code)
+    membership_expiration = membership_expiration.strftime("%d/%m/%Y")
     short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
     sms_message = SMS_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
     if is_invalid_ducati_member_code:
         sms_message = f'{sms_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
     send_sms(phone_number, sms_message)
-    email_message = EMAIL_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{card_url}}', short_card_url)
+    email_message = EMAIL_TEMPLATE_ISSUE_SUCCESS.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{membership_expiration}}', membership_expiration).replace('{{ducati_member_code}}', ducati_member_code).replace('{{card_url}}', short_card_url)
     if is_invalid_ducati_member_code:
         email_message = f'{email_message}\n{TEMPLATE_ISSUE_MISSING_DUCATI_MEMBER_CODE}'
     send_email(EMAIL_SUBJECT_ISSUE, email_message, email_address)
@@ -315,7 +316,7 @@ def _send_renewal_notification(ducati_member_code, email_address, hebrew_full_na
 
     membership_expiration = f'{membership_expiration.strftime("%d/%m/%Y")} (בעוד {days_till_expiration} ימים)'
     if is_invalid_ducati_member_code:
-        sms_message = SMS_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
+        sms_message = SMS_TEMPLATE_RENEWAL_REQUEST_INVALID_CODE.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
     else:
         sms_message = SMS_TEMPLATE_RENEWAL_REQUEST.replace('{{hebrew_full_name}}', hebrew_full_name).replace('{{ducati_member_code}}', ducati_member_code).replace('{{membership_expiration}}', membership_expiration).replace('{{contact_phone_number}}', CONTACT_PHONE_NUMBER)
 
@@ -331,15 +332,17 @@ def _send_renewal_notification(ducati_member_code, email_address, hebrew_full_na
 
 EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
 היי {{hebrew_full_name}},
-שמחים שהצטרפת למועדון דוקאטי!
+אנחנו שמחים שהצטרפת למועדון דוקאטי! 
 
-הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
+מספר החבר שלך הוא {{ducati_member_code}}
+בנוסף, הונפק לך כרטיס חבר דיגיטלי בכתובת {{card_url}}
 
 אנא שמור על כתובת זו במועדפים.
 
 אנא הצג כרטיס זה בעת קבלת שירות או טיפול או רכישת אביזרים כדי לקבל את ההטבות המגיעות לחברי המועדון.
-שים לב לתוקף הרישום שלך. כחודש לפני תום החברות תקבל התראה לחידוש. במידה ולא תחדש למרות ההתראות, החברות שלך תפוג תוקף אוטומטית.
 
+תאריך התפוגה של החברות שלך במועדון: {{membership_expiration}}
+כחודש לפני תום החברות תקבל התראה לחידוש. במידה ולא תחדש למרות ההתראות, החברות שלך תפוג תוקף אוטומטית.
 <img width="180" src="https://card.docil.co.il/preview.png">
 '''
 
