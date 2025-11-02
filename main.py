@@ -343,6 +343,7 @@ EMAIL_TEMPLATE_ISSUE_SUCCESS = '''
 
 תאריך התפוגה של החברות שלך במועדון: {{membership_expiration}}
 כחודש לפני תום החברות תקבל התראה לחידוש. במידה ולא תחדש למרות ההתראות, החברות שלך תפוג תוקף אוטומטית.
+
 <img width="180" src="https://card.docil.co.il/preview.png">
 '''
 
