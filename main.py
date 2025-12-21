@@ -55,7 +55,6 @@ CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
 
 # Google Wallet configuration (optional)
 GOOGLE_WALLET_ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
-GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS = os.environ.get('GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS')
 
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
 RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 31
@@ -70,15 +69,6 @@ aws_sns_client = aws_session.client('sns', region_name=AWS_SNS_REGION)
 google_service_account_credentials = json.loads(bytes.fromhex(GOOGLE_SERVICE_ACCOUNT_CREDENTIALS).decode())
 google_sheets_client = GoogleSheetsClient(google_service_account_credentials, GOOGLE_SPREADSHEET_ID)
 
-# Initialize Google Wallet credentials (optional)
-google_wallet_credentials = None
-if GOOGLE_WALLET_ISSUER_ID and GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS:
-    try:
-        google_wallet_credentials = json.loads(
-            bytes.fromhex(GOOGLE_WALLET_SERVICE_ACCOUNT_CREDENTIALS).decode()
-        )
-    except Exception as e:
-        logging.warning(f'Google Wallet credentials parsing failed: {e}')
 
 
 def normalize_phone_number(phone_number, default_country_code="IL"):
@@ -201,7 +191,7 @@ def create_apple_wallet_card(vcard_info):
 
 def create_google_wallet_card(vcard_info):
     """Generate Google Wallet pass URL for a member."""
-    if google_wallet_credentials is None or GOOGLE_WALLET_ISSUER_ID is None:
+    if google_service_account_credentials is None or GOOGLE_WALLET_ISSUER_ID is None:
         return None
 
     issuer_id = GOOGLE_WALLET_ISSUER_ID
@@ -273,7 +263,7 @@ def create_google_wallet_card(vcard_info):
 
     # Create and sign JWT
     credentials = Credentials.from_service_account_info(
-        google_wallet_credentials,
+        google_service_account_credentials,
         scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
     )
     claims = {
@@ -287,7 +277,7 @@ def create_google_wallet_card(vcard_info):
         }
     }
 
-    signer = crypt.RSASigner.from_service_account_info(google_wallet_credentials)
+    signer = crypt.RSASigner.from_service_account_info(google_service_account_credentials)
     token = google_jwt.encode(signer, claims).decode('utf-8')
 
     return {'url': f"https://pay.google.com/gp/v/save/{token}"}
@@ -373,16 +363,12 @@ def main():
                 apple_wallet_card = create_apple_wallet_card(vcard_info)
                 aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
 
-                # Generate and upload Google Wallet card (if configured)
-                if google_wallet_credentials is not None:
-                    try:
-                        google_wallet_card = create_google_wallet_card(vcard_info)
-                        if google_wallet_card:
-                            google_wallet_card_json = json.dumps(google_wallet_card)
-                            google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
-                            aws_s3_resource.meta.client.put_object(Body=google_wallet_card_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'android_card/{vcard_id}.json', ACL='public-read', ContentType='application/json')
-                    except Exception as e:
-                        logging.warning(f'failed to generate Google Wallet card for line #{index}: {e}')
+
+                google_wallet_card = create_google_wallet_card(vcard_info)
+                if google_wallet_card:
+                    google_wallet_card_json = json.dumps(google_wallet_card)
+                    google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
+                    aws_s3_resource.meta.client.put_object(Body=google_wallet_card_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'android_card/{vcard_id}.json', ACL='public-read', ContentType='application/json')
 
                 short_url_info = json.dumps({
                     'id': vcard_id
