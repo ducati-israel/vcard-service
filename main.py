@@ -15,6 +15,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from applepassgenerator.client import ApplePassGeneratorClient
 from applepassgenerator.models import Generic
+from google.auth import crypt
+from google.auth import jwt as google_jwt
+from google.oauth2.service_account import Credentials
 
 dotenv.load_dotenv()
 
@@ -50,6 +53,9 @@ AWS_SNS_REGION = os.environ['AWS_SNS_REGION']
 AWS_SES_REGION = os.environ['AWS_SES_REGION']
 CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
 
+# Google Wallet configuration (optional)
+GOOGLE_WALLET_ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
 RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 31
 RENEWAL_NOTIFICATIONS_TTL_DAYS = 15
@@ -62,6 +68,7 @@ aws_sns_client = aws_session.client('sns', region_name=AWS_SNS_REGION)
 
 google_service_account_credentials = json.loads(bytes.fromhex(GOOGLE_SERVICE_ACCOUNT_CREDENTIALS).decode())
 google_sheets_client = GoogleSheetsClient(google_service_account_credentials, GOOGLE_SPREADSHEET_ID)
+
 
 
 def normalize_phone_number(phone_number, default_country_code="IL"):
@@ -182,6 +189,100 @@ def create_apple_wallet_card(vcard_info):
         return apple_card.read()
 
 
+def create_google_wallet_card(vcard_info):
+    """Generate Google Wallet pass URL for a member."""
+    if google_service_account_credentials is None or GOOGLE_WALLET_ISSUER_ID is None:
+        return None
+
+    issuer_id = GOOGLE_WALLET_ISSUER_ID
+    class_suffix = "docil_membership_v8"
+
+    membership_expiration = vcard_info['membership_expiration']
+    ducati_member_code = vcard_info['ducati_member_code']
+    english_full_name = vcard_info['english_full_name']
+    hebrew_full_name = vcard_info['hebrew_full_name']
+    registration_type = vcard_info['registration_type']
+    motorcycle_model = vcard_info['motorcycle_model']
+
+    # Build pass class definition
+    class_id = f"{issuer_id}.{class_suffix}"
+    pass_class = {
+        'id': class_id,
+        'classTemplateInfo': {
+            'cardTemplateOverride': {
+                'cardRowTemplateInfos': [
+                    {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['hebrew_name']"}]}}}},
+                    {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['membership_number']"}]}}}},
+                    {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['bike_model']"}]}}}},
+                    {'twoItems': {
+                        'startItem': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['membership_type']"}]}},
+                        'endItem': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['expiry_date']"}]}}
+                    }}
+                ]
+            }
+        }
+    }
+
+    # Build pass object definition
+    object_suffix = f"member_{ducati_member_code.replace('-', '_')}_v8"
+    object_id = f"{issuer_id}.{object_suffix}"
+    pass_object = {
+        'id': object_id,
+        'classId': class_id,
+        'genericType': 'GENERIC_TYPE_UNSPECIFIED',
+        'state': 'ACTIVE',
+        'cardTitle': {
+            'defaultValue': {'language': 'he', 'value': 'כרטיס DOC ישראל'},
+            'translatedValues': [{'language': 'en-US', 'value': 'DOC Israel Card'}]
+        },
+        'header': {
+            'defaultValue': {'language': 'he', 'value': hebrew_full_name},
+            'translatedValues': [{'language': 'en-US', 'value': english_full_name}]
+        },
+        'subheader': {
+            'defaultValue': {'language': 'he', 'value': f"שנת {membership_expiration.split('-')[0]}"},
+            'translatedValues': [{'language': 'en-US', 'value': f"Year {membership_expiration.split('-')[0]}"}]
+        },
+        'hexBackgroundColor': '#CB1517',
+        'logo': {
+            'sourceUri': {'uri': 'https://ducati-israel-vcard.s3.amazonaws.com/images/logo.png'},
+            'contentDescription': {'defaultValue': {'language': 'en-US', 'value': 'DOC Israel Logo'}}
+        },
+        'heroImage': {
+            'sourceUri': {'uri': 'https://ducati-israel-vcard.s3.amazonaws.com/images/hero.png'},
+            'contentDescription': {'defaultValue': {'language': 'en-US', 'value': 'DOC Israel Banner'}}
+        },
+        'textModulesData': [
+            {'id': 'hebrew_name', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'שם'}, 'translatedValues': [{'language': 'en-US', 'value': 'Name'}]}, 'body': hebrew_full_name},
+            {'id': 'bike_model', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'דגם אופנוע'}, 'translatedValues': [{'language': 'en-US', 'value': 'Bike Model'}]}, 'body': motorcycle_model},
+            {'id': 'membership_number', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'קוד דוקאטי'}, 'translatedValues': [{'language': 'en-US', 'value': 'Ducati Code'}]}, 'body': ducati_member_code},
+            {'id': 'membership_type', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'סוג חברות'}, 'translatedValues': [{'language': 'en-US', 'value': 'Member Type'}]}, 'body': registration_type},
+            {'id': 'expiry_date', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'בתוקף עד'}, 'translatedValues': [{'language': 'en-US', 'value': 'Valid Until'}]}, 'body': membership_expiration}
+        ],
+    }
+
+    # Create and sign JWT
+    credentials = Credentials.from_service_account_info(
+        google_service_account_credentials,
+        scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+    )
+    claims = {
+        'iss': credentials.service_account_email,
+        'aud': 'google',
+        'typ': 'savetowallet',
+        'origins': [],
+        'payload': {
+            'genericClasses': [pass_class],
+            'genericObjects': [pass_object]
+        }
+    }
+
+    signer = crypt.RSASigner.from_service_account_info(google_service_account_credentials)
+    token = google_jwt.encode(signer, claims).decode('utf-8')
+
+    return {'url': f"https://pay.google.com/gp/v/save/{token}"}
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
     google_sheets_client.reload()
@@ -261,6 +362,13 @@ def main():
 
                 apple_wallet_card = create_apple_wallet_card(vcard_info)
                 aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
+
+
+                google_wallet_card = create_google_wallet_card(vcard_info)
+                if google_wallet_card:
+                    google_wallet_card_json = json.dumps(google_wallet_card)
+                    google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
+                    aws_s3_resource.meta.client.put_object(Body=google_wallet_card_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'android_card/{vcard_id}.json', ACL='public-read', ContentType='application/json')
 
                 short_url_info = json.dumps({
                     'id': vcard_id
