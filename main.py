@@ -17,7 +17,9 @@ from applepassgenerator.client import ApplePassGeneratorClient
 from applepassgenerator.models import Generic
 from google.auth import crypt
 from google.auth import jwt as google_jwt
+from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
+import requests
 
 dotenv.load_dotenv()
 
@@ -189,8 +191,7 @@ def create_apple_wallet_card(vcard_info):
         return apple_card.read()
 
 
-def create_google_wallet_card(vcard_info):
-    """Generate Google Wallet pass URL for a member."""
+def create_and_update_google_wallet_card(vcard_info):
     if google_service_account_credentials is None or GOOGLE_WALLET_ISSUER_ID is None:
         return None
 
@@ -261,11 +262,13 @@ def create_google_wallet_card(vcard_info):
         ],
     }
 
-    # Create and sign JWT
+    # Get authenticated credentials
     credentials = Credentials.from_service_account_info(
         google_service_account_credentials,
         scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
     )
+
+    # 1. Create JWT for "Add to Wallet" URL
     claims = {
         'iss': credentials.service_account_email,
         'aud': 'google',
@@ -276,11 +279,30 @@ def create_google_wallet_card(vcard_info):
             'genericObjects': [pass_object]
         }
     }
-
     signer = crypt.RSASigner.from_service_account_info(google_service_account_credentials)
     token = google_jwt.encode(signer, claims).decode('utf-8')
+    jwt_url = f"https://pay.google.com/gp/v/save/{token}"
 
-    return {'url': f"https://pay.google.com/gp/v/save/{token}"}
+    # 2. Try to update existing card via API (for users who already saved it)
+    credentials.refresh(Request())
+    api_url = f"https://walletobjects.googleapis.com/walletobjects/v1/genericObject/{object_id}"
+    headers = {
+        'Authorization': f'Bearer {credentials.token}',
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        response = requests.patch(api_url, headers=headers, json=pass_object)
+        if response.status_code == 200:
+            logging.info(f'Google Wallet object updated: {object_id}')
+        elif response.status_code == 404:
+            logging.debug(f'Google Wallet object not found (not yet saved by user): {object_id}')
+        else:
+            logging.warning(f'Google Wallet update failed ({response.status_code}): {response.text}')
+    except Exception as e:
+        logging.warning(f'Google Wallet update error: {e}')
+
+    return {'url': jwt_url}
 
 
 def main():
@@ -364,7 +386,7 @@ def main():
                 aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
 
 
-                google_wallet_card = create_google_wallet_card(vcard_info)
+                google_wallet_card = create_and_update_google_wallet_card(vcard_info)
                 if google_wallet_card:
                     google_wallet_card_json = json.dumps(google_wallet_card)
                     google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
