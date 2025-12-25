@@ -33,6 +33,7 @@ APPLE_CARD_PKPASS_PRIVATE_KEY_PASSWORD = os.environ['APPLE_CARD_PRIVATE_KEY_PASS
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 HEADER_BOT_STATUS = 'סטטוס בוט'
+HEADER_CARD_URL = 'קישור לכרטיס'
 HEADER_LAST_RENEWAL_REMINDER_DATE = 'תאריך תזכורת חידוש אחרון'
 STATUS_UPDATE = 'עדכון'
 STATUS_UPDATE_TYPO = 'עידכון'
@@ -404,6 +405,11 @@ def main():
                 new_status = f'{bot_status} - {STATUS_DONE}'
                 logging.info(f'issued card for line #{index}')
                 google_sheets_client.set_item_field(item, HEADER_BOT_STATUS, new_status)
+
+                short_card_url = f'https://card.docil.co.il/#/{short_vcard_id}'
+                if item[HEADER_CARD_URL] != short_card_url:
+                    google_sheets_client.set_item_field(item, HEADER_CARD_URL, short_card_url)
+
                 time.sleep(RATE_LIMIT_SLEEP_INTERVAL_SECONDS)
                 total_document_updates_count += 1
 
