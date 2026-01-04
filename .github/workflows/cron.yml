@@ -40,6 +40,7 @@ jobs:
           APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
           APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
           CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
+          GOOGLE_WALLET_ISSUER_ID: "${{secrets.GOOGLE_WALLET_ISSUER_ID}}"
       - name: Run Sync
         run: |
           python3 main.py
@@ -54,3 +55,4 @@ jobs:
           APPLE_CARD_PRIVATE_KEY: "${{secrets.APPLE_CARD_PRIVATE_KEY}}"
           APPLE_CARD_PRIVATE_KEY_PASSWORD: "${{secrets.APPLE_CARD_PRIVATE_KEY_PASSWORD}}"
           CONTACT_PHONE_NUMBER: "${{secrets.CONTACT_PHONE_NUMBER}}"
+          GOOGLE_WALLET_ISSUER_ID: "${{secrets.GOOGLE_WALLET_ISSUER_ID}}"
