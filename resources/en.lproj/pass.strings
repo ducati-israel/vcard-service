@@ -1,5 +1,25 @@
 "membership_type" = "Membership type";
+"expiration" = "Expiration";
+"motorcycle_details" = "Motorcycle Details";
+
 "bike" = "Bike";
 "ducati_code" = "Ducati code";
 "year" = "Year";
 "DOC_Israel_Card" = "DOC Israel Card";
+"license_number" = "License number";
+"manufacture_year" = "Year of manufacture";
+"bike_1" = "Bike 1";
+"bike_2" = "Bike 2";
+"bike_3" = "Bike 3";
+"front_bike_1" = "Bike 1";
+"front_bike_2" = "Bike 2";
+"front_bike_3" = "Bike 3";
+"front_bike_1_year" = "Bike 1 Year";
+"front_bike_2_year" = "Bike 2 Year";
+"front_bike_3_year" = "Bike 3 Year";
+"front_bike_1_license" = "Bike 1 License Number";
+"front_bike_2_license" = "Bike 2 License Number";
+"front_bike_3_license" = "Bike 3 License Number";
+"member_type" = "Member type";
+"model_year" = "Model year";
+"benefits" = "Ducati club member benefits";

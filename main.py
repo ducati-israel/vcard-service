@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from applepassgenerator.client import ApplePassGeneratorClient
-from applepassgenerator.models import Generic
+from applepassgenerator.models import Barcode, BarcodeFormat, EventTicket
 from google.auth import crypt
 from google.auth import jwt as google_jwt
 from google.auth.transport.requests import Request
@@ -35,6 +35,11 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 HEADER_BOT_STATUS = 'סטטוס בוט'
 HEADER_CARD_URL = 'קישור לכרטיס'
 HEADER_LAST_RENEWAL_REMINDER_DATE = 'תאריך תזכורת חידוש אחרון'
+HEADER_LEGACY_MOTORCYCLE_MODEL = 'דגם אופנוע נוכחי'
+HEADER_MOTORCYCLE_MODEL_TEMPLATE = 'אופנוע {} - דגם'
+HEADER_MOTORCYCLE_LICENSE_TEMPLATE = 'אופנוע {} - מספר רישוי'
+HEADER_MOTORCYCLE_YEAR_TEMPLATE = 'אופנוע {} - שנתון'
+MAX_MOTORCYCLES = 3
 STATUS_UPDATE = 'עדכון'
 STATUS_UPDATE_TYPO = 'עידכון'
 STATUS_ISSUE = 'הנפקה'
@@ -55,9 +60,7 @@ AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 AWS_SNS_REGION = os.environ['AWS_SNS_REGION']
 AWS_SES_REGION = os.environ['AWS_SES_REGION']
 CONTACT_PHONE_NUMBER = os.environ['CONTACT_PHONE_NUMBER']
-
-# Google Wallet configuration (optional)
-GOOGLE_WALLET_ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+GOOGLE_WALLET_ISSUER_ID = os.environ['GOOGLE_WALLET_ISSUER_ID']
 
 RATE_LIMIT_SLEEP_INTERVAL_SECONDS = 5
 RENEWAL_NOTIFICATIONS_PERIOD_DAYS = 31
@@ -85,6 +88,130 @@ def normalize_phone_number(phone_number, default_country_code="IL"):
 
 def normalize_email_address(email_address):
     return email_address.lower().strip()
+
+
+def parse_manufacture_year(value):
+    value = str(value or '').strip()
+    match = re.match(r'^(\d{4})(\.0+)?$', value)
+    return int(match.group(1)) if match else None
+
+
+def parse_motorcycles(item):
+    motorcycles = []
+    for motorcycle_index in range(1, MAX_MOTORCYCLES + 1):
+        model_header = HEADER_MOTORCYCLE_MODEL_TEMPLATE.format(motorcycle_index)
+        if model_header not in item:
+            break
+
+        model = str(item.get(model_header) or '').strip()
+        license_number = str(item.get(HEADER_MOTORCYCLE_LICENSE_TEMPLATE.format(motorcycle_index)) or '').strip()
+        manufacture_year = parse_manufacture_year(item.get(HEADER_MOTORCYCLE_YEAR_TEMPLATE.format(motorcycle_index)))
+        if not model and not license_number and not manufacture_year:
+            continue
+
+        motorcycles.append({
+            "model": model,
+            "licenseNumber": license_number,
+            "manufactureYear": manufacture_year,
+        })
+
+    # backward compatibility - sheets without the per-motorcycle columns
+    if not motorcycles:
+        legacy_model = str(item.get(HEADER_LEGACY_MOTORCYCLE_MODEL) or '').strip()
+        if legacy_model:
+            motorcycles.append({
+                "model": legacy_model,
+                "licenseNumber": '',
+                "manufactureYear": None,
+            })
+
+    return motorcycles
+
+
+def format_motorcycle_models(motorcycles):
+    return ', '.join(motorcycle['model'] for motorcycle in motorcycles if motorcycle['model'])
+
+
+def format_motorcycle_summary(motorcycles):
+    # wallet card fronts fit a single short line - first model and how many more there are
+    models = [motorcycle['model'] for motorcycle in motorcycles if motorcycle['model']]
+    if not models:
+        return ''
+
+    if len(motorcycles) == 1:
+        return models[0]
+
+    return f'{models[0]} +{len(motorcycles) - 1}'
+
+
+def build_apple_wallet_motorcycle_front_fields(motorcycles):
+    # with the qr code on the pass front there is room for two rows of auxiliary fields (up to 4 fields each) -
+    # the first row holds the membership type and expiration, the motorcycles get the second row.
+    # a single motorcycle gets a field for its model, year and license,
+    # otherwise each motorcycle is a single field that carries the year and license as its label
+    has_multiple_motorcycles = len(motorcycles) > 1
+    fields = []
+    for motorcycle_index, motorcycle in enumerate(motorcycles, start=1):
+        model_label = f'bike_{motorcycle_index}' if has_multiple_motorcycles else 'bike'
+        manufacture_year = str(motorcycle['manufactureYear'] or '')
+        if has_multiple_motorcycles:
+            details = ' · '.join(detail for detail in [manufacture_year, motorcycle['licenseNumber']] if detail)
+            fields.append({'key': f'front_bike_{motorcycle_index}', 'value': motorcycle['model'] or '-', 'label': details or model_label, 'row': 1})
+            continue
+
+        fields.append({'key': f'front_bike_{motorcycle_index}', 'value': motorcycle['model'] or '-', 'label': model_label, 'row': 1})
+        if manufacture_year:
+            fields.append({'key': f'front_bike_{motorcycle_index}_year', 'value': manufacture_year, 'label': 'model_year', 'row': 1})
+        if motorcycle['licenseNumber']:
+            fields.append({'key': f'front_bike_{motorcycle_index}_license', 'value': motorcycle['licenseNumber'], 'label': 'license_number', 'row': 1})
+
+    return fields
+
+
+def build_google_wallet_motorcycle_modules(motorcycles):
+    modules = []
+    for motorcycle_index, motorcycle in enumerate(motorcycles, start=1):
+
+        bike_model = motorcycle['model']
+        if not bike_model:
+            continue
+
+        modules.append(
+            {
+                'id': f'bike_{motorcycle_index}_model',
+                'localizedHeader': {
+                    'defaultValue': {'language': 'he', 'value': f'דגם אופנוע {motorcycle_index}'},
+                    'translatedValues': [{'language': 'en-US', 'value': f'Motorcycle Model {motorcycle_index}'}]
+                },
+                'body': bike_model
+            })
+
+
+        bike_licence_number = motorcycle['licenseNumber']
+        if bike_licence_number:
+            modules.append(
+                {
+                    'id': f'bike_{motorcycle_index}_licence_number',
+                    'localizedHeader': {
+                        'defaultValue': {'language': 'he', 'value': f'מספר רישוי {motorcycle_index}'},
+                        'translatedValues': [{'language': 'en-US', 'value': f'License number {motorcycle_index}'}]
+                    },
+                    'body': bike_licence_number
+                })
+
+        bike_manufacture_year = motorcycle['manufactureYear']
+        if bike_manufacture_year:
+            modules.append(
+                {
+                    'id': f'bike_{motorcycle_index}_year',
+                    'localizedHeader': {
+                        'defaultValue': {'language': 'he', 'value': f'שנת ייצור {motorcycle_index}'},
+                        'translatedValues': [{'language': 'en-US', 'value': f'Year of manufacture {motorcycle_index}'}]
+                    },
+                    'body': bike_manufacture_year
+                })
+
+    return modules
 
 
 def send_sms(phone_number, sms_message, sender_id=SMS_SENDER_ID):
@@ -129,8 +256,8 @@ def send_email(email_subject, email_text, recipient_email_address, sender_email_
         logging.exception('could not send email')
 
 
-def create_apple_wallet_card(vcard_info):
-    card_info = Generic()
+def create_apple_wallet_card(vcard_id, vcard_info):
+    card_info = EventTicket()
 
     membership_year = vcard_info['membership_year']
     membership_expiration = vcard_info['membership_expiration']
@@ -138,18 +265,36 @@ def create_apple_wallet_card(vcard_info):
     english_full_name = vcard_info['english_full_name']
     hebrew_full_name = vcard_info['hebrew_full_name']
     registration_type = vcard_info['registration_type']
-    motorcycle_model = vcard_info['motorcycle_model']
+    motorcycles = vcard_info.get('motorcycles', [])
+    has_multiple_motorcycles = len(motorcycles) > 1
 
     card_info.add_header_field('year', membership_year, 'year')
     card_info.add_primary_field('code', ducati_member_code, 'ducati_code')
     card_info.add_secondary_field('Name', english_full_name, 'Name')
     card_info.add_secondary_field('local_name', hebrew_full_name, 'שם')
     card_info.add_auxiliary_field('type', registration_type, 'membership_type')
-    card_info.add_auxiliary_field('bike', motorcycle_model, 'bike')
+    card_info.add_auxiliary_field('expiration', membership_expiration, 'expiration')
+
+    for field in build_apple_wallet_motorcycle_front_fields(motorcycles):
+        card_info.add_auxiliary_field(field['key'], field['value'], field['label'])
+        # the library has no row argument - fields are serialized from their attributes
+        card_info.auxiliary_fields[-1].row = field['row']
+
     if vcard_info.get('revoked'):
         card_info.add_back_field('note', f'Membership expired - חברות לא בתוקף', '')
     else:
         card_info.add_back_field('note', f'Membership valid until {membership_expiration}', '')
+
+    # the back of the pass has no space limits - every motorcycle is listed there in full
+    for motorcycle_index, motorcycle in enumerate(motorcycles, start=1):
+        model_label = f'bike_{motorcycle_index}' if has_multiple_motorcycles else 'bike'
+        card_info.add_back_field(f'bike_{motorcycle_index}_model', motorcycle['model'] or '-', model_label)
+        if motorcycle['licenseNumber']:
+            card_info.add_back_field(f'bike_{motorcycle_index}_license', motorcycle['licenseNumber'], 'license_number')
+        if motorcycle['manufactureYear']:
+            card_info.add_back_field(f'bike_{motorcycle_index}_year', str(motorcycle['manufactureYear']), 'manufacture_year')
+
+    card_info.add_back_field('benefits', 'https://www.docil.co.il/?page_id=479', 'benefits')
 
     apple_pass_client = ApplePassGeneratorClient(APPLE_CARD_TEAM_IDENTIFIER, APPLE_CARD_PASS_TYPE_IDENTIFIER, APPLE_CARD_ORGANIZATION_NAME)
     apple_pass = apple_pass_client.get_pass(card_info)
@@ -157,6 +302,10 @@ def create_apple_wallet_card(vcard_info):
     apple_pass.logo_text = 'DOC_Israel_Card'
     apple_pass.foreground_color = 'rgb(255,255,255)'
     apple_pass.label_color = 'rgb(255,255,255)'
+    # same qr code as the google wallet card
+    apple_pass.barcode = Barcode(vcard_id, BarcodeFormat.QR)
+    # same end of validity as the google wallet card - the pass shows as expired after it
+    apple_pass.expiration_date = f'{membership_expiration}T23:59:59+02:00'
 
     resource_dir_path = os.path.join(SCRIPT_DIR, 'resources')
     resources = {
@@ -192,10 +341,7 @@ def create_apple_wallet_card(vcard_info):
         return apple_card.read()
 
 
-def create_and_update_google_wallet_card(vcard_info):
-    if google_service_account_credentials is None or GOOGLE_WALLET_ISSUER_ID is None:
-        return None
-
+def create_and_update_google_wallet_card(vcard_id, vcard_info):
     issuer_id = GOOGLE_WALLET_ISSUER_ID
     class_suffix = "docil_membership_v8"
 
@@ -204,7 +350,7 @@ def create_and_update_google_wallet_card(vcard_info):
     english_full_name = vcard_info['english_full_name']
     hebrew_full_name = vcard_info['hebrew_full_name']
     registration_type = vcard_info['registration_type']
-    motorcycle_model = vcard_info['motorcycle_model']
+    motorcycles = vcard_info.get('motorcycles', [])
 
     # Build pass class definition
     class_id = f"{issuer_id}.{class_suffix}"
@@ -215,7 +361,6 @@ def create_and_update_google_wallet_card(vcard_info):
                 'cardRowTemplateInfos': [
                     {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['hebrew_name']"}]}}}},
                     {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['membership_number']"}]}}}},
-                    {'oneItem': {'item': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['bike_model']"}]}}}},
                     {'twoItems': {
                         'startItem': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['membership_type']"}]}},
                         'endItem': {'firstValue': {'fields': [{'fieldPath': "object.textModulesData['expiry_date']"}]}}
@@ -228,6 +373,16 @@ def create_and_update_google_wallet_card(vcard_info):
     # Build pass object definition
     object_suffix = f"member_{ducati_member_code.replace('-', '_')}_v8"
     object_id = f"{issuer_id}.{object_suffix}"
+
+    google_wallet_fields = [
+            {'id': 'hebrew_name', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'שם'}, 'translatedValues': [{'language': 'en-US', 'value': 'Name'}]}, 'body': hebrew_full_name},
+            {'id': 'membership_number', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'קוד דוקאטי'}, 'translatedValues': [{'language': 'en-US', 'value': 'Ducati Code'}]}, 'body': ducati_member_code},
+            {'id': 'membership_type', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'סוג חברות'}, 'translatedValues': [{'language': 'en-US', 'value': 'Member Type'}]}, 'body': registration_type},
+            {'id': 'expiry_date', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'בתוקף עד'}, 'translatedValues': [{'language': 'en-US', 'value': 'Valid Until'}]}, 'body': membership_expiration}
+        ]
+
+    google_wallet_fields.extend(build_google_wallet_motorcycle_modules(motorcycles))
+
     pass_object = {
         'id': object_id,
         'classId': class_id,
@@ -242,8 +397,8 @@ def create_and_update_google_wallet_card(vcard_info):
             'translatedValues': [{'language': 'en-US', 'value': english_full_name}]
         },
         'subheader': {
-            'defaultValue': {'language': 'he', 'value': f"שנת {membership_expiration.split('-')[0]}"},
-            'translatedValues': [{'language': 'en-US', 'value': f"Year {membership_expiration.split('-')[0]}"}]
+            'defaultValue': {'language': 'he', 'value': f"בתוקף עד {membership_expiration}"},
+            'translatedValues': [{'language': 'en-US', 'value': f"Valid Until {membership_expiration}"}]
         },
         'hexBackgroundColor': '#CB1517',
         'logo': {
@@ -254,13 +409,32 @@ def create_and_update_google_wallet_card(vcard_info):
             'sourceUri': {'uri': 'https://ducati-israel-vcard.s3.amazonaws.com/images/hero.png'},
             'contentDescription': {'defaultValue': {'language': 'en-US', 'value': 'DOC Israel Banner'}}
         },
-        'textModulesData': [
-            {'id': 'hebrew_name', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'שם'}, 'translatedValues': [{'language': 'en-US', 'value': 'Name'}]}, 'body': hebrew_full_name},
-            {'id': 'bike_model', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'דגם אופנוע'}, 'translatedValues': [{'language': 'en-US', 'value': 'Bike Model'}]}, 'body': motorcycle_model},
-            {'id': 'membership_number', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'קוד דוקאטי'}, 'translatedValues': [{'language': 'en-US', 'value': 'Ducati Code'}]}, 'body': ducati_member_code},
-            {'id': 'membership_type', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'סוג חברות'}, 'translatedValues': [{'language': 'en-US', 'value': 'Member Type'}]}, 'body': registration_type},
-            {'id': 'expiry_date', 'localizedHeader': {'defaultValue': {'language': 'he', 'value': 'בתוקף עד'}, 'translatedValues': [{'language': 'en-US', 'value': 'Valid Until'}]}, 'body': membership_expiration}
-        ],
+        'textModulesData': google_wallet_fields,
+        'barcode': {
+            'type': 'QR_CODE',
+            'value': vcard_id,
+        },
+        'validTimeInterval': {
+            'start': {
+                'date': f'{membership_expiration.split('-')[0]}-01-01T00:00:00+02:00',
+            },
+            'end': {
+                'date': f'{membership_expiration}T23:59:59+02:00',
+            },
+        },
+        'linksModuleData': {
+            'uris': [
+                {
+                    'uri': 'https://www.docil.co.il/?page_id=479',
+                    'description': 'הטבות לחברי מועדון דוקאטי',
+                },
+            ],
+        },
+        'notifications': {
+            'expiryNotification': {
+                'enableNotification': True,
+            },
+        },
     }
 
     # Get authenticated credentials
@@ -317,6 +491,17 @@ def main():
 
         bot_status = ''
         try:
+
+            hebrew_full_name = item['שם מלא בעברית'].strip()
+            if not hebrew_full_name:
+                logging.debug(f'skipping line {index}, empty hebrew full name')
+                continue
+
+            english_full_name = item['שם מלא באנגלית'].strip()
+            if not english_full_name:
+                logging.debug(f'skipping line {index}, empty english full name')
+                continue
+
             email_address = item['כתובת אימייל']
             if not email_address:
                 logging.debug(f'skipping line {index}, empty phone')
@@ -334,10 +519,9 @@ def main():
             membership_year = item['חברות'].strip()
             ducati_member_code = item['קוד דוקאטי'].strip()
             role = item['תפקיד'].strip()
-            hebrew_full_name = item['שם מלא בעברית'].strip()
-            english_full_name = item['שם מלא באנגלית'].strip()
             tags = item['אישור'].strip().split(',')
-            motorcycle_model = item['דגם אופנוע נוכחי'].strip()
+            motorcycles = parse_motorcycles(item)
+            motorcycle_model = format_motorcycle_models(motorcycles)
             membership_expiration = item['תפוגה'].strip()
             try:
                 membership_expiration = datetime.datetime.strptime(membership_expiration, "%Y-%m-%d")
@@ -372,6 +556,7 @@ def main():
                     "role": role,
                     "tags": tags,
                     "motorcycle_model": motorcycle_model,
+                    "motorcycles": motorcycles,
                     "registration_type": registration_type,
                 }
 
@@ -383,15 +568,13 @@ def main():
                 vcard_info_json_encoded = vcard_info_json.encode('utf-8')
                 aws_s3_resource.meta.client.put_object(Body=vcard_info_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'card/{vcard_id}.json', ACL='public-read')
 
-                apple_wallet_card = create_apple_wallet_card(vcard_info)
+                apple_wallet_card = create_apple_wallet_card(vcard_id, vcard_info)
                 aws_s3_resource.meta.client.put_object(Body=apple_wallet_card, Bucket=AWS_S3_BUCKET_NAME, Key=f'apple_card/{vcard_id}.pkpass', ACL='public-read')
 
-
-                google_wallet_card = create_and_update_google_wallet_card(vcard_info)
-                if google_wallet_card:
-                    google_wallet_card_json = json.dumps(google_wallet_card)
-                    google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
-                    aws_s3_resource.meta.client.put_object(Body=google_wallet_card_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'android_card/{vcard_id}.json', ACL='public-read', ContentType='application/json')
+                google_wallet_card = create_and_update_google_wallet_card(vcard_id, vcard_info)
+                google_wallet_card_json = json.dumps(google_wallet_card)
+                google_wallet_card_json_encoded = google_wallet_card_json.encode('utf-8')
+                aws_s3_resource.meta.client.put_object(Body=google_wallet_card_json_encoded, Bucket=AWS_S3_BUCKET_NAME, Key=f'android_card/{vcard_id}.json', ACL='public-read', ContentType='application/json')
 
                 short_url_info = json.dumps({
                     'id': vcard_id
