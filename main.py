@@ -241,7 +241,7 @@ def send_email(email_subject, email_text, recipient_email_address, sender_email_
 
     email_message.attach(email_message_body)
     email_message.add_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-    email_message.add_header('Cache - Control', 'post - check = 0, pre - check = 0')
+    email_message.add_header('Cache-Control', 'post - check = 0, pre - check = 0')
     email_message.add_header('Pragma', 'no-cache')
     try:
         aws_ses_client.send_raw_email(
